@@ -1,0 +1,36 @@
+# Credentials — never upload these
+token.pickle
+client_secret.json
+*.pickle
+
+# App runtime folders
+app_uploads/
+logs/
+outputs/
+input/
+master/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+env/
+.env/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Streamlit
+.streamlit/secrets.toml
+
+#settings
+settings.json
