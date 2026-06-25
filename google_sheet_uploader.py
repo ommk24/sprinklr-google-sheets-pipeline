@@ -9,8 +9,10 @@ import gspread
 
 from process_sprinklr import (
     DEFAULT_DATA_SHEET,
+    SPRINKLR_HEADER_ROW,
     audit_entry,
     is_deleted_post,
+    normalize_header,
     normalize_permalink,
     read_sprinklr_rows,
     transform_sprinklr_row,
@@ -33,12 +35,8 @@ def open_worksheet(sheet_url: str, worksheet_name: str, token_path: Path = TOKEN
     return sheet.worksheet(worksheet_name)
 
 
-def normalize_google_header(value: Any) -> str:
-    return "" if value is None else str(value).strip()
-
-
 def get_google_sheet_headers(worksheet) -> list[str]:
-    return [normalize_google_header(value) for value in worksheet.row_values(1)]
+    return [normalize_header(value) for value in worksheet.row_values(1)]
 
 
 def google_header_index(headers: list[str]) -> dict[str, int]:
@@ -157,22 +155,6 @@ def format_for_google_sheet(value: Any, header: str) -> Any:
         return value.strftime("%d-%m-%Y")
     if isinstance(value, time):
         return value.strftime("%H:%M")
-    if header in {
-        "Reach",
-        "Views",
-        "PE",
-        "Likes",
-        "Saves",
-        "Shares",
-        "Reposts",
-        "Comments",
-        "Pos Comments",
-        "Neg Comments",
-        "Neutral Comments",
-        "Vis Engagement",
-        "Follows",
-    }:
-        return _format_number_value(value)
     return _format_number_value(value)
 
 
@@ -202,13 +184,6 @@ def validate_google_headers(headers: list[str], config: dict[str, Any], mode: st
     return sorted(header for header in required if header not in available)
 
 
-def _read_transformable_rows(sprinklr_path: Path, config: dict[str, Any]) -> list[dict[str, Any]]:
-    return read_sprinklr_rows(
-        sprinklr_path,
-        int(config.get("sprinklr_header_row", 3)),
-    )
-
-
 def weekly_direct_append(
     sprinklr_path: str | Path,
     sheet_url: str,
@@ -224,7 +199,7 @@ def weekly_direct_append(
         raise ValueError(f"Google Sheet is missing required headers: {missing_headers}")
 
     existing = get_google_permalink_index(worksheet, headers)
-    rows = _read_transformable_rows(sprinklr_path, config)
+    rows = read_sprinklr_rows(sprinklr_path, int(config.get("sprinklr_header_row", SPRINKLR_HEADER_ROW)))
     rows_to_append: list[list[Any]] = []
     row_audit: list[dict[str, Any]] = []
 
@@ -297,7 +272,7 @@ def periodical_direct_update(
 
     header_index = google_header_index(headers)
     existing = get_google_permalink_index(worksheet, headers)
-    rows = _read_transformable_rows(sprinklr_path, config)
+    rows = read_sprinklr_rows(sprinklr_path, int(config.get("sprinklr_header_row", SPRINKLR_HEADER_ROW)))
     row_audit: list[dict[str, Any]] = []
     updates: list[dict[str, Any]] = []
 
@@ -342,6 +317,7 @@ def periodical_direct_update(
     if updates and not dry_run:
         worksheet.batch_update(updates, value_input_option="USER_ENTERED")
 
+    updated_row_set = {entry["target_row"] for entry in row_audit if entry["action"] == "updated"}
     return {
         "mode": "periodical_direct_update",
         "dry_run": dry_run,
@@ -352,9 +328,9 @@ def periodical_direct_update(
         "deleted_posts_removed": deleted_posts_removed,
         "missing_permalink_rows": missing_permalink_rows,
         "unmatched_periodical_rows": unmatched_periodical_rows,
-        "rows_to_update": len({entry["target_row"] for entry in row_audit if entry["action"] == "updated"}),
+        "rows_to_update": len(updated_row_set),
         "cells_to_update": len(updates),
-        "rows_updated": 0 if dry_run else len({entry["target_row"] for entry in row_audit if entry["action"] == "updated"}),
+        "rows_updated": 0 if dry_run else len(updated_row_set),
         "missing_google_headers": [],
         "row_audit": row_audit,
     }

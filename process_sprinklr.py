@@ -15,92 +15,11 @@ from openpyxl.formula.translate import Translator
 from openpyxl.styles import Font, PatternFill
 
 
+# Public constants — used as function default params and imported by other modules.
 DEFAULT_DATA_SHEET = "2026 Data"
 SPRINKLR_HEADER_ROW = 3
 MASTER_HEADER_ROW = 1
 DELETED_POST_TOKEN = "deleted post"
-
-
-SPRINKLR_TO_MASTER = {
-    "Published Date": "Date",
-    "PublishedTime": "Time",
-    "Outbound Post": "Outbound Post",
-    "Campaign Name": "Campaign Name",
-    "Permalink": "Permalink",
-    "YT - Theme": "YT Theme",
-    "IG Post Reach": "Reach",
-    "IG Post Views": "Views",
-    "[YT] Positive Engagements (SUM)": "PE",
-    "IG Likes": "Likes",
-    "IG Saves": "Saves",
-    "IG Shares": "Shares",
-    "IG Reposts": "Reposts",
-    "IG Reels Skip Rate": "Skip Rate %",
-    "IG Reels Average Watch Time": "Avg Watch Time (Seconds)",
-    "IG Share Rate": "Share rate",
-    "IG Comments": "Comments",
-    "IG Positive Comments": "Pos Comments",
-    "IG Negative Comments": "Neg Comments",
-    "IG Neutral Comments": "Neutral Comments",
-    "[SLI] Engagements (SUM)": "Vis Engagement",
-    "[SLI] Engagement Rate in %": "ER%",
-    "IG Post Followers Gained": "Follows",
-}
-
-PERCENT_AS_DECIMAL_SOURCE_COLUMNS = {
-    "IG Share Rate",
-    "[SLI] Engagement Rate in %",
-}
-
-NUMERIC_SOURCE_COLUMNS = {
-    "IG Post Reach",
-    "IG Post Views",
-    "[YT] Positive Engagements (SUM)",
-    "IG Likes",
-    "IG Saves",
-    "IG Shares",
-    "IG Reposts",
-    "IG Reels Skip Rate",
-    "IG Comments",
-    "IG Positive Comments",
-    "IG Negative Comments",
-    "IG Neutral Comments",
-    "[SLI] Engagements (SUM)",
-    "IG Post Followers Gained",
-}
-
-WEEKLY_FORMULA_COLUMNS = {
-    "Year",
-    "H1/H2",
-    "Quarter",
-    "Month",
-    "Fortnight",
-    "Week",
-    "Day",
-    "Hourly Buckets",
-    "Topic_List",
-    "Topic_Options",
-}
-
-PERIODICAL_UPDATE_COLUMNS = {
-    "Reach",
-    "Views",
-    "PE",
-    "Likes",
-    "Saves",
-    "Shares",
-    "Reposts",
-    "Skip Rate %",
-    "Avg Watch Time (Seconds)",
-    "Share rate",
-    "Comments",
-    "Pos Comments",
-    "Neg Comments",
-    "Neutral Comments",
-    "Vis Engagement",
-    "ER%",
-    "Follows",
-}
 
 EXCEL_EXTENSIONS = {".xlsx", ".xlsm", ".xltx", ".xltm"}
 
@@ -123,36 +42,12 @@ class RunStats:
     row_audit: list[dict[str, Any]] | None = None
 
 
-def default_config() -> dict[str, Any]:
-    return {
-        "data_sheet": DEFAULT_DATA_SHEET,
-        "sprinklr_header_row": SPRINKLR_HEADER_ROW,
-        "master_header_row": MASTER_HEADER_ROW,
-        "deleted_post_token": DELETED_POST_TOKEN,
-        "master_path": "master/Google sheet sample.xlsx",
-        "weekly_input_dir": "input/weekly",
-        "periodical_input_dir": "input/periodical",
-        "output_dir": "outputs",
-        "log_dir": "logs",
-        "fail_on_missing_source_columns": True,
-        "sprinklr_to_master": SPRINKLR_TO_MASTER,
-        "periodical_update_columns": sorted(PERIODICAL_UPDATE_COLUMNS),
-        "percent_as_decimal_source_columns": sorted(PERCENT_AS_DECIMAL_SOURCE_COLUMNS),
-        "numeric_source_columns": sorted(NUMERIC_SOURCE_COLUMNS),
-        "reel_permalink_contains": "reel",
-        "non_reel_override_columns": {
-            "IG Reels Skip Rate": "NA",
-            "IG Reels Average Watch Time": "NA",
-        },
-    }
-
-
-def load_config(path: Path | None) -> dict[str, Any]:
-    config = default_config()
-    if path and path.exists():
-        incoming = json.loads(path.read_text(encoding="utf-8"))
-        config.update(incoming)
-    return config
+def load_config(path: Path) -> dict[str, Any]:
+    if not path or not path.exists():
+        raise FileNotFoundError(
+            f"settings.json not found at '{path}'. The app cannot run without it."
+        )
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def resolve_path(path_value: str | Path, base_dir: Path) -> Path:
@@ -446,12 +341,20 @@ def add_validation_report(wb, stats: RunStats) -> None:
     audit.freeze_panes = "A2"
 
 
-def run_weekly(master_path: Path, sprinklr_path: Path, output_path: Path, data_sheet: str, config: dict[str, Any]) -> RunStats:
-    stats = RunStats(mode="weekly_append")
-    stats.row_audit = []
-    stats.master_path = str(master_path)
-    stats.sprinklr_path = str(sprinklr_path)
-    stats.output_path = str(output_path)
+def _load_excel_context(
+    master_path: Path,
+    sprinklr_path: Path,
+    output_path: Path,
+    data_sheet: str,
+    config: dict[str, Any],
+    stats: RunStats,
+) -> tuple[Any, Any, dict[str, int], dict[str, int], list[dict[str, Any]], int]:
+    """Open the master workbook, read Sprinklr rows, validate columns.
+
+    Populates stats.sprinklr_rows_seen and the missing-column fields.
+    Raises ValueError (after saving a partial report) on column errors.
+    Returns (wb, ws, master_headers, existing_permalink_index, rows, master_header_row).
+    """
     wb = load_workbook(master_path)
     ws = wb[data_sheet]
     master_header_row = int(config.get("master_header_row", MASTER_HEADER_ROW))
@@ -466,9 +369,25 @@ def run_weekly(master_path: Path, sprinklr_path: Path, output_path: Path, data_s
     if missing_source and config.get("fail_on_missing_source_columns", True):
         add_validation_report(wb, stats)
         wb.save(output_path)
-        raise ValueError(f"Missing Sprinklr source columns: {missing_source}. Validation report saved to {output_path}")
+        raise ValueError(
+            f"Missing Sprinklr source columns: {missing_source}. Validation report saved to {output_path}"
+        )
     if missing_master:
         raise ValueError(f"Missing master columns: {missing_master}")
+    return wb, ws, master_headers, existing, rows, master_header_row
+
+
+def run_weekly(master_path: Path, sprinklr_path: Path, output_path: Path, data_sheet: str, config: dict[str, Any]) -> RunStats:
+    stats = RunStats(
+        mode="weekly_append",
+        row_audit=[],
+        master_path=str(master_path),
+        sprinklr_path=str(sprinklr_path),
+        output_path=str(output_path),
+    )
+    wb, ws, master_headers, existing, rows, master_header_row = _load_excel_context(
+        master_path, sprinklr_path, output_path, data_sheet, config, stats
+    )
     append_row = first_blank_permalink_row(ws, master_headers, master_header_row)
     formula_template_row = master_header_row + 1
 
@@ -507,30 +426,18 @@ def run_weekly(master_path: Path, sprinklr_path: Path, output_path: Path, data_s
 def run_periodical(
     master_path: Path, sprinklr_path: Path, output_path: Path, data_sheet: str, config: dict[str, Any]
 ) -> RunStats:
-    stats = RunStats(mode="periodical_update")
-    stats.row_audit = []
-    stats.master_path = str(master_path)
-    stats.sprinklr_path = str(sprinklr_path)
-    stats.output_path = str(output_path)
-    wb = load_workbook(master_path)
-    ws = wb[data_sheet]
-    master_header_row = int(config.get("master_header_row", MASTER_HEADER_ROW))
-    sprinklr_header_row = int(config.get("sprinklr_header_row", SPRINKLR_HEADER_ROW))
-    master_headers = header_map(ws, master_header_row)
-    existing = existing_permalink_index(ws, master_headers, master_header_row)
-    rows = read_sprinklr_rows(sprinklr_path, sprinklr_header_row)
-    stats.sprinklr_rows_seen = len(rows)
-    missing_source, missing_master = validate_columns(master_headers, rows, config)
-    stats.missing_source_columns = missing_source
-    stats.missing_master_columns = missing_master
-    if missing_source and config.get("fail_on_missing_source_columns", True):
-        add_validation_report(wb, stats)
-        wb.save(output_path)
-        raise ValueError(f"Missing Sprinklr source columns: {missing_source}. Validation report saved to {output_path}")
-    if missing_master:
-        raise ValueError(f"Missing master columns: {missing_master}")
-
+    stats = RunStats(
+        mode="periodical_update",
+        row_audit=[],
+        master_path=str(master_path),
+        sprinklr_path=str(sprinklr_path),
+        output_path=str(output_path),
+    )
+    wb, ws, master_headers, existing, rows, _ = _load_excel_context(
+        master_path, sprinklr_path, output_path, data_sheet, config, stats
+    )
     reverse_map = {target: source for source, target in config["sprinklr_to_master"].items()}
+
     for sprinklr_row in rows:
         source_row = int(sprinklr_row.get("_source_row", 0))
         if is_deleted_post(sprinklr_row, config.get("deleted_post_token", DELETED_POST_TOKEN)):
