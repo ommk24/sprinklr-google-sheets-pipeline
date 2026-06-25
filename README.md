@@ -1,6 +1,6 @@
 # Sprinklr → Google Sheets Pipeline
 
-A local automation tool that syncs Sprinklr social media exports directly into a reporting Google Sheet — replacing a manual copy-paste workflow with a config-driven, auditable pipeline.
+A local automation tool that syncs Sprinklr social media exports directly into a reporting Google Sheet, replacing a manual copy-paste workflow with a config-driven, auditable pipeline.
 
 Built with Python and Streamlit.
 
@@ -9,8 +9,8 @@ Built with Python and Streamlit.
 ## What it does
 
 Takes a Sprinklr export (`.xlsx`) and either:
-- **Weekly Append** — adds new posts to the Google Sheet, skipping any permalink that already exists
-- **Periodical Update** — refreshes metric columns for existing posts by matching on permalink
+- **Weekly Append** - adds new posts to the Google Sheet, skipping any permalink that already exists
+- **Periodical Update** - refreshes metric columns for existing posts by matching on permalink
 
 Both modes run a **dry-run preview first**, so you can review exactly what will change before writing anything to the Sheet.
 
